@@ -35,7 +35,9 @@ app.use(
 
 // 4) routes
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
-
+app.get("/", (req, res) => {
+  res.redirect("/login"); // o "/products"
+});
 app.use(authRoutes);
 app.use('/api',apiRoutes);
 app.use(ssrRoutes);
