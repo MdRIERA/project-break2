@@ -1,0 +1,658 @@
+openapi: 3.0.3
+info:
+  title: ProjectBreak - SSR + API Productos
+  version: 1.0.0
+  description: >
+    - SSR (HTML): tienda pública y dashboard admin.
+    - API (JSON): endpoints REST de productos bajo /api.
+    Auth admin por sesión (cookie connect.sid de express-session) SOLO en rutas SSR protegidas.
+
+servers:
+  - url: http://localhost:3000
+
+tags:
+  - name: SSR - Public
+    description: Rutas SSR públicas (HTML)
+  - name: SSR - Auth
+    description: Login / Logout (HTML)
+  - name: SSR - Admin
+    description: Dashboard SSR protegido (HTML)
+  - name: API - Products
+    description: API JSON de productos (actualmente sin isAdmin en rutas)
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: connect.sid
+      description: >
+        Cookie de sesión de express-session. Se genera tras POST /login.
+
+  schemas:
+    Product:
+      type: object
+      required: [Nombre, Descripcion, Imagen, Categoria, Talla, Precio]
+      properties:
+        _id:
+          type: string
+          example: 6985e3960f9dbb3c0e7e2ed7
+        Nombre:
+          type: string
+          example: Camiseta Deportiva Nike
+        Descripcion:
+          type: string
+          example: Camiseta transpirable ideal para entrenamiento
+        Imagen:
+          type: string
+          example: https://res.cloudinary.com/demo/image/upload/v123/tienda-ropa/abc.webp
+        ImagenId:
+          type: string
+          description: public_id / filename de Cloudinary (multer-storage-cloudinary)
+          example: tienda-ropa/abc
+        Categoria:
+          type: string
+          enum: [Ropa, Calzado, Accesorios, Deportiva, Urbana]
+        Talla:
+          type: string
+          enum: [XS, S, M, L, XL, XXL]
+        Precio:
+          type: number
+          example: 29.99
+
+    LoginInput:
+      type: object
+      required: [user, password]
+      properties:
+        user:
+          type: string
+          example: admin
+        password:
+          type: string
+          example: "1234"
+
+    ProductCreateForm:
+      type: object
+      required: [Nombre, Descripcion, Categoria, Talla, Precio, image]
+      properties:
+        Nombre:
+          type: string
+        Descripcion:
+          type: string
+        Categoria:
+          type: string
+          enum: [Ropa, Calzado, Accesorios, Deportiva, Urbana]
+        Talla:
+          type: string
+          enum: [XS, S, M, L, XL, XXL]
+        Precio:
+          type: number
+        image:
+          type: string
+          format: binary
+
+    ProductUpdateForm:
+      type: object
+      properties:
+        Nombre:
+          type: string
+        Descripcion:
+          type: string
+        Categoria:
+          type: string
+          enum: [Ropa, Calzado, Accesorios, Deportiva, Urbana]
+        Talla:
+          type: string
+          enum: [XS, S, M, L, XL, XXL]
+        Precio:
+          type: number
+        image:
+          type: string
+          format: binary
+
+    JsonOkList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
+
+    JsonOkOne:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/Product"
+
+    JsonOkOneWithMessage:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/Product"
+        message:
+          type: string
+          example: Producto actualizado
+
+    JsonCreatedWithMessage:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/Product"
+        message:
+          type: string
+          example: Producto creado
+
+    JsonMessage:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Producto borrado
+
+    JsonError:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Error en el servidor
+
+  responses:
+    HtmlOk:
+      description: Respuesta SSR (HTML)
+      content:
+        text/html:
+          schema:
+            type: string
+          example: "<html><body>...</body></html>"
+
+    RedirectToLogin:
+      description: Sin sesión → redirige a /login
+      headers:
+        Location:
+          schema:
+            type: string
+          example: /login
+
+    JsonServerError:
+      description: Error interno
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/JsonError"
+          example:
+            error: Error en el servidor
+
+    JsonNotFound:
+      description: Producto no encontrado
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/JsonError"
+          example:
+            error: Producto no encontrado
+
+    JsonBadRequest:
+      description: Petición inválida / validación
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/JsonError"
+          examples:
+            imageRequired:
+              summary: Falta imagen
+              value:
+                error: La imagen es obligatoria
+            imageIdRequired:
+              summary: Falta ImagenId
+              value:
+                error: ImagenId es obligatoria
+            noFields:
+              summary: No hay campos para actualizar
+              value:
+                error: No hay campos para actualizar
+
+paths:
+  # =========================
+  # SSR - PUBLIC
+  # =========================
+  /products:
+    get:
+      tags: [SSR - Public]
+      summary: SSR - Muestra todos los productos (tienda)
+      description: >
+        Permite filtros por query params: cat, talla, q (búsqueda por nombre),
+        y rango de precio min/max.
+      parameters:
+        - in: query
+          name: cat
+          schema:
+            type: string
+            enum: [Ropa, Calzado, Accesorios, Deportiva, Urbana]
+          description: Filtrar por categoría
+        - in: query
+          name: talla
+          schema:
+            type: string
+            enum: [XS, S, M, L, XL, XXL]
+          description: Filtrar por talla
+        - in: query
+          name: q
+          schema:
+            type: string
+          description: Búsqueda por nombre (regex case-insensitive)
+        - in: query
+          name: min
+          schema:
+            type: number
+          description: Precio mínimo
+        - in: query
+          name: max
+          schema:
+            type: number
+          description: Precio máximo
+      responses:
+        "200":
+          $ref: "#/components/responses/HtmlOk"
+        "500":
+          description: Error en servidor (SSR)
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /products/{productId}:
+    get:
+      tags: [SSR - Public]
+      summary: SSR - Detalle de un producto (tienda)
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/HtmlOk"
+        "404":
+          description: Producto no encontrado (SSR)
+          content:
+            text/html:
+              schema:
+                type: string
+
+  # =========================
+  # SSR - AUTH
+  # =========================
+  /login:
+    get:
+      tags: [SSR - Auth]
+      summary: SSR - Formulario login admin
+      responses:
+        "200":
+          $ref: "#/components/responses/HtmlOk"
+
+    post:
+      tags: [SSR - Auth]
+      summary: SSR - Login admin (crea sesión)
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "302":
+          description: Login OK (redirige a /dashboard)
+          headers:
+            Location:
+              schema:
+                type: string
+              example: /dashboard
+        "401":
+          description: Credenciales incorrectas (SSR)
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /logout:
+    get:
+      tags: [SSR - Auth]
+      summary: SSR - Logout (cierra sesión)
+      responses:
+        "302":
+          description: Logout OK (redirige a /products)
+          headers:
+            Location:
+              schema:
+                type: string
+              example: /products
+
+  # =========================
+  # SSR - ADMIN (PROTEGIDO)
+  # =========================
+  /dashboard:
+    get:
+      tags: [SSR - Admin]
+      summary: SSR - Dashboard admin con listado de productos
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          $ref: "#/components/responses/HtmlOk"
+        "302":
+          $ref: "#/components/responses/RedirectToLogin"
+
+    post:
+      tags: [SSR - Admin]
+      summary: SSR - Crea un producto (form + imagen)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/ProductCreateForm"
+      responses:
+        "302":
+          description: Crea OK → redirige al detalle del producto en dashboard
+          headers:
+            Location:
+              schema:
+                type: string
+              example: /dashboard/6985e3960f9dbb3c0e7e2ed7
+        "400":
+          description: Imagen obligatoria (SSR)
+          content:
+            text/html:
+              schema:
+                type: string
+        "500":
+          description: Error en servidor (SSR)
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /dashboard/new:
+    get:
+      tags: [SSR - Admin]
+      summary: SSR - Formulario para crear producto
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          $ref: "#/components/responses/HtmlOk"
+        "302":
+          $ref: "#/components/responses/RedirectToLogin"
+
+  /dashboard/{productId}:
+    get:
+      tags: [SSR - Admin]
+      summary: SSR - Detalle de producto en dashboard
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/HtmlOk"
+        "404":
+          description: Producto no encontrado (SSR)
+          content:
+            text/html:
+              schema:
+                type: string
+
+    put:
+      tags: [SSR - Admin]
+      summary: SSR - Actualiza un producto (form + imagen opcional)
+      description: >
+        Se usa con method-override (POST + ?_method=PUT) desde formularios.
+        Si se envía nueva imagen, borra la anterior en Cloudinary usando ImagenId.
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/ProductUpdateForm"
+      responses:
+        "302":
+          description: Update OK → redirige al detalle del producto
+          headers:
+            Location:
+              schema:
+                type: string
+              example: /dashboard/6985e3960f9dbb3c0e7e2ed7
+        "404":
+          description: Producto no encontrado (SSR)
+          content:
+            text/html:
+              schema:
+                type: string
+        "500":
+          description: Error en servidor (SSR)
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /dashboard/{productId}/edit:
+    get:
+      tags: [SSR - Admin]
+      summary: SSR - Formulario de edición de producto
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/HtmlOk"
+        "404":
+          description: Producto no encontrado (SSR)
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /dashboard/{productId}/delete:
+    delete:
+      tags: [SSR - Admin]
+      summary: SSR - Elimina un producto
+      description: >
+        Se usa con method-override (POST + ?_method=DELETE) desde formularios.
+        Si existe ImagenId, se borra en Cloudinary.
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Delete OK → redirige a /dashboard
+          headers:
+            Location:
+              schema:
+                type: string
+              example: /dashboard
+        "404":
+          description: Producto no encontrado (SSR)
+          content:
+            text/html:
+              schema:
+                type: string
+        "500":
+          description: Error en servidor (SSR)
+          content:
+            text/html:
+              schema:
+                type: string
+
+  # =========================
+  # API JSON (BAJO /api)
+  # =========================
+  /api/products:
+    get:
+      tags: [API - Products]
+      summary: API - Lista de productos (JSON)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonOkList"
+              example:
+                data:
+                  - _id: 6985e3960f9dbb3c0e7e2ed7
+                    Nombre: Camiseta Deportiva Nike
+                    Descripcion: Camiseta transpirable ideal para entrenamiento
+                    Imagen: https://res.cloudinary.com/demo/image/upload/v123/tienda-ropa/abc.webp
+                    ImagenId: tienda-ropa/abc
+                    Categoria: Deportiva
+                    Talla: M
+                    Precio: 29.99
+        "500":
+          $ref: "#/components/responses/JsonServerError"
+
+    post:
+      tags: [API - Products]
+      summary: API - Crea un producto (JSON + multipart)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/ProductCreateForm"
+      responses:
+        "201":
+          description: Creado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonCreatedWithMessage"
+              example:
+                data:
+                  _id: 6985e3960f9dbb3c0e7e2ed7
+                  Nombre: Camiseta Deportiva Nike
+                  Descripcion: Camiseta transpirable ideal para entrenamiento
+                  Imagen: https://res.cloudinary.com/demo/image/upload/v123/tienda-ropa/abc.webp
+                  ImagenId: tienda-ropa/abc
+                  Categoria: Deportiva
+                  Talla: M
+                  Precio: 29.99
+                message: Producto creado
+        "400":
+          $ref: "#/components/responses/JsonBadRequest"
+        "500":
+          $ref: "#/components/responses/JsonServerError"
+
+  /api/products/{productId}:
+    get:
+      tags: [API - Products]
+      summary: API - Producto por id (JSON)
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonOkOne"
+        "404":
+          $ref: "#/components/responses/JsonNotFound"
+        "500":
+          $ref: "#/components/responses/JsonServerError"
+
+    put:
+      tags: [API - Products]
+      summary: API - Actualiza producto (JSON + multipart)
+      description: >
+        Si se envía nueva imagen, borra la anterior en Cloudinary usando ImagenId.
+        Si no llega ningún campo (ni imagen), devuelve 400 "No hay campos para actualizar".
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/ProductUpdateForm"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonOkOneWithMessage"
+              example:
+                data:
+                  _id: 6985e3960f9dbb3c0e7e2ed7
+                  Nombre: Camiseta Deportiva Nike
+                  Descripcion: Camiseta transpirable ideal para entrenamiento
+                  Imagen: https://res.cloudinary.com/demo/image/upload/v123/tienda-ropa/abc.webp
+                  ImagenId: tienda-ropa/abc
+                  Categoria: Deportiva
+                  Talla: M
+                  Precio: 29.99
+                message: Producto actualizado
+        "400":
+          $ref: "#/components/responses/JsonBadRequest"
+        "404":
+          $ref: "#/components/responses/JsonNotFound"
+        "500":
+          $ref: "#/components/responses/JsonServerError"
+
+    delete:
+      tags: [API - Products]
+      summary: API - Elimina producto (JSON)
+      description: >
+        Si existe ImagenId, se borra en Cloudinary.
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonMessage"
+              example:
+                message: Producto borrado
+        "404":
+          $ref: "#/components/responses/JsonNotFound"
+        "500":
+          $ref: "#/components/responses/JsonServerError"
