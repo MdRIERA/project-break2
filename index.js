@@ -7,7 +7,7 @@ const YAML = require("yamljs");
 const swaggerDocument = YAML.load("./openapi.yaml");
 
 
-const ssrRoutes = require("./routes/productRoutes");      // tus SSR actuales
+const ssrRoutes = require("./routes/productRoutes");    
 const apiRoutes = require("./routes/productApiRoutes");   
 const authRoutes = require("./routes/authRoutes");
 const connectDB = require("./config/db");
